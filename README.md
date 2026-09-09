@@ -2,7 +2,19 @@
 
 # A_maze_ing
 
-A configurable maze generator, solver and visualizer written in Python. The program reads its parameters from a plain-text configuration file, generates a maze of the requested dimensions, computes the shortest path between the entry and the exit, writes the result to a text file, and renders the whole thing in a graphical window using the MLX library.
+A configurable maze generator, solver and visualizer written in Python. The program reads its parameters from a plain-text configuration file, generates a maze of the requested dimensions, computes the shortest path between the entry and the exit, writes the result to a text file, and renders the whole thing in a graphical window using the MLX library. Every maze has the 42 logo carved into its center, and the shortest path is animated tile by tile across three color themes.
+
+---
+
+## Preview
+
+![Solving animation](assets/demo.gif)
+
+<p align="center">
+  <img src="assets/theme_cyan.png" width="32%" alt="Cyan theme">
+  <img src="assets/theme_green.png" width="32%" alt="Green theme">
+  <img src="assets/theme_purple.png" width="32%" alt="Purple theme">
+</p>
 
 ---
 
@@ -99,7 +111,7 @@ The program takes exactly one argument and it must be `config.txt`. Any other in
 Once the window is open:
 
 | Key | Action                                  |
-|-----|-----------------------------------------|
+|-----|------------------------------------------|
 | `Q` | Quit and close the window               |
 | `R` | Regenerate a new maze and solve it      |
 | `S` | Show or hide the solution path          |
@@ -129,7 +141,7 @@ SEED = 0
 ### Keys
 
 | Key           | Type            | Constraints                                                              |
-|---------------|-----------------|--------------------------------------------------------------------------|
+|---------------|-----------------|----------------------------------------------------------------------------|
 | `WIDTH`       | integer         | Between 1 and 55 inclusive                                                |
 | `HEIGHT`      | integer         | Between 1 and 35 inclusive                                                |
 | `ENTRY`       | `x,y` integers  | Must be inside the grid, and must differ from `EXIT`                      |
@@ -157,72 +169,19 @@ The configuration is rejected, with an explicit message, when:
 
 ---
 
-## Technical choices
-
-### Generation: iterative depth-first search with backtracking
-
-The maze starts as a full grid of cells with all four walls standing. A random starting cell is picked, and the algorithm repeatedly walks to a random unvisited neighbour, breaking the wall between the two cells and pushing the new cell onto a stack. When the current cell has no unvisited neighbours left, the algorithm pops the stack and resumes from the previous cell. The process ends when every cell has been visited.
-
-**Why this algorithm.** Three reasons drove the choice:
-
-1. **It fits the "42" constraint naturally.** The symbol is drawn first by marking its cells as `visited` and `is_42`. Because DFS only ever carves into cells it has not visited, and because `break_wall` refuses to modify a cell flagged `is_42`, the symbol is protected without a single special case in the carving loop itself. An algorithm such as Kruskal's or Prim's, which reason about edges and sets rather than a walk, would have needed explicit exclusion logic threaded through the whole implementation.
-2. **The mazes it produces look good.** DFS is biased towards long, winding corridors with few short dead ends, which is visually far more interesting than the short, bushy corridors produced by Prim's algorithm.
-3. **It is written iteratively rather than recursively.** At the maximum size of 55x35 the recursion depth could reach 1925 frames, which is uncomfortably close to Python's default limit. Managing the stack explicitly removes the problem entirely and keeps memory usage predictable.
-
-### Imperfect mazes: braiding
-
-When `PERFECT = False`, a second pass sweeps the grid and looks for cells with exactly three standing walls, which are precisely the dead ends. For each one, a random direction is chosen and the corresponding wall is broken, provided the neighbour exists and is not part of the "42" symbol. The sweep is repeated several times, since breaking one wall can turn a neighbouring cell into a new dead end.
-
-The result is a maze with loops and multiple routes between any two points, which makes the pathfinding stage meaningful: a solver on a perfect maze has no choice to make, while on a braided maze it has to prove the path it returns is actually the shortest one.
-
-### Solving: breadth-first search
-
-The solver explores the maze level by level from the entry point, using a queue and a `parent_map` that records which cell each newly discovered cell was reached from. Movement between two adjacent cells is only allowed when the wall separating them has been broken, which is read directly from the `Cell` wall flags.
-
-**Why this algorithm.** On an unweighted grid, BFS is guaranteed to find a shortest path, and it finds it the first time it reaches the exit. That guarantee matters here because braided mazes contain several valid routes, and the project asks for the shortest. DFS would return a valid path but rarely the shortest one, and A\* would only pay off on grids far larger than 55x35, at the cost of a heuristic that has to be justified. BFS gives the correct answer with no tuning.
-
-Once the exit is reached, the solver walks the `parent_map` backwards to reconstruct the cell sequence, then converts each consecutive pair of coordinates into a single character (`N`, `E`, `S`, `W`) by looking at their difference. The resulting string is what gets written to the output file and what the display module replays tile by tile.
-
-### Display
-
-The renderer maps every hexadecimal character to a pre-rendered 26x26 PNG tile, so drawing a maze is a matter of reading the output file and blitting one image per character. The grid is horizontally centered inside the window based on its width, and the solution path is drawn with a short delay between tiles so the route is animated rather than appearing all at once.
-
----
-
 ## Reusability
 
-The reusable component is **`maze_generator.py`**, which contains the `Cell` and `MazeGenerator` classes.
-
-It is a genuinely standalone module: it imports nothing from `configuration`, `algorithm` or `graphical_display`, and depends only on Python's standard `random`. Every parameter it needs is passed to its constructor, and it never reads a file, prints to the screen, or reaches into global state.
-
-To make that independence concrete rather than merely claimed, the module is **packaged and distributed as a wheel**. A `setup.py` at the root declares it as the sole distributable module, and `make install` installs the built `mazegen-1.0.0-py3-none-any.whl` alongside MLX. The rest of the project then consumes it exactly the way any third-party user would, through a plain `import`, which means a broken dependency on our internals would fail loudly instead of going unnoticed.
-
-Building the wheel from source:
+The reusable component is **`maze_generator.py`**, which holds the `Cell` and `MazeGenerator` classes. It's a standalone module — no imports from `configuration`, `algorithm` or `graphical_display`, every parameter passed through the constructor, no file/screen/global-state access. To enforce that independence, it's built and distributed as its own wheel (`mazegen-1.0.0-py3-none-any.whl`), consumed by the rest of the project through a plain `import` like any third-party package.
 
 ```python
 from mazegen import MazeGenerator
 
-generator = MazeGenerator(
-    width=55,
-    height=35,
-    entry={"x": 0, "y": 0},
-    exit={"x": 54, "y": 34},
-    perfect=False,
-    seed=1,
-)
-
+generator = MazeGenerator(width=55, height=35, entry={"x": 0, "y": 0}, exit={"x": 54, "y": 34}, perfect=False, seed=1)
 maze = generator.generate_paths(seed=1)   # returns the grid as list[list[Cell]]
 generator.maze_output("output.txt")       # writes the hexadecimal representation
 ```
 
-Running `python3 maze_generator.py` directly executes a small demo `main()` that generates a 55x35 maze and writes it to `output.txt`, which makes the module testable in isolation without launching the graphical window.
-
-Two design decisions make it portable to another project:
-
-- **The output format is a contract, not an implementation detail.** Any consumer that understands the four-bit wall encoding can use the generated file without importing our classes at all. That is exactly how the display module consumes it.
-- **Every public method returns data instead of causing side effects.** `generate_paths` returns the grid, `get_hexa` returns a character, `has_neighbours` returns a boolean. The only method that touches the filesystem is `maze_output`, and it is optional.
-
-The `configuration` package is reusable in a narrower sense: the parsing helpers in `configuration_utils.py` handle any `KEY = VALUE` file with comment support, and adapting them to a different project is a matter of changing the class attributes and the validation rules.
+Running `python3 maze_generator.py` directly generates a 55x35 maze and writes it to `output.txt`, so the module is testable without launching the graphical window.
 
 ---
 
@@ -251,21 +210,13 @@ The `configuration` package is reusable in a narrower sense: the parsing helpers
 │   ├── __init__.py            Exports display_output
 │   ├── display.py             MLX window, rendering, key hooks
 │   └── display_utils.py       Theme and control image tables
-└── images/
-    ├── first_set/             Theme 1 tiles
-    ├── second_set/            Theme 2 tiles
-    ├── third_set/             Theme 3 tiles
-    └── controls/              On-screen control legend
+├── images/
+│   ├── first_set/             Theme 1 tiles
+│   ├── second_set/            Theme 2 tiles
+│   ├── third_set/             Theme 3 tiles
+│   └── controls/              On-screen control legend
+└── assets/                    README media: demo gif and theme screenshots
 ```
-
----
-
-## Additional features
-
-
-- **Three color themes.** Each theme is a complete set of wall tiles plus its own background, entry, exit and path sprites, cycled at runtime with `C`.
-- **Animated path drawing.** The solution is drawn one tile at a time rather than instantly.
-- **Packaged generator.** The generator ships as an installable wheel rather than a loose file, so its independence from the rest of the project is enforced by the import system.
 
 ---
 
@@ -274,35 +225,11 @@ The `configuration` package is reusable in a narrower sense: the parsing helpers
 ### Roles
 
 | Member     | Responsibility                                                                 |
-|------------|---------------------------------------------------------------------------------|
+|------------|-----------------------------------------------------------------------------------|
 | `labdalla` | Configuration system: file parsing, type conversion, validation rules, error handling |
 | `naldibis` | Pathfinding: the BFS solver, path reconstruction and the move-string encoding    |
 
 Everything else, including the maze generation algorithm, the "42" symbol, the braiding pass, the graphical display, the themes, the keyboard controls and the tooling, was written jointly.
-
-### Planning and how it evolved
-
-We planned the project as four sequential stages, each on its own branch, merged into `main` through a pull request once it worked in isolation:
-
-```
-config  ->  maze_generation  ->  search_algo  ->  visual_representation
-```
-
-The order was deliberate. Configuration had to come first because everything downstream depends on the parameters it produces; generation before solving because there is nothing to solve otherwise; display last because it consumes the output of all three.
-
-The plan mostly held, but three things changed along the way:
-
-1. **The generator was extracted into a standalone module partway through.** It initially lived alongside the rest of the code and imported from `config` directly. The reusability requirement pushed us to cut that dependency and pass every parameter explicitly through the constructor, which turned out to be a better design regardless of the requirement.
-2. **Braiding was not in the original plan.** We started by building only perfect mazes. Adding imperfect mazes came later, once we realized that a shortest-path solver on a perfect maze is not really demonstrating anything, since there is only one route to find.
-3. **The window resolution was revised.** The display was first written for a 2560x1440 layout and had to be brought down to 1920x1080 to match the actual screens in the cluster, which is also what fixed the maximum maze dimensions at 55x35.
-4. **Packaging came at the end.** Turning the generator into a distributable wheel was not part of the initial plan. Doing it forced us to rename the `config` package to `configuration`, since the shorter name was too generic to sit safely at the top level of a distribution, and it confirmed that the module really had no hidden dependencies on the rest of the code.
-
-### What worked well
-
-- **Branch per stage with pull requests.** Reviewing each other's code before merging caught problems early and meant neither of us was ever blocked by the other's unfinished work.
-- **The hexadecimal output format as an interface.** Because the display reads a file rather than our objects, the rendering work could proceed against a hand-written maze file before the generator was finished.
-- **Seeding.** Being able to reproduce an exact maze turned intermittent visual glitches into deterministic, debuggable failures.
-- **Linting from the start.** Running `flake8` and `mypy` continuously, rather than cleaning up at the end, kept the codebase consistent between two authors with different habits.
 
 ### What could be improved
 
